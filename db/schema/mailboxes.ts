@@ -32,6 +32,7 @@ export const mailboxes = pgTable(
     autoCloseEnabled: boolean().notNull().default(false),
     autoCloseDaysOfInactivity: integer().notNull().default(14),
     chatIntegrationUsed: boolean().notNull().default(false),
+    emailEscalationRecipients: text("email_escalation_recipients"),
     preferences: jsonb()
       .$type<{
         autoRespondEmailToChat?: "draft" | "reply" | null;

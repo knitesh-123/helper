@@ -1,0 +1,1 @@
+ALTER TABLE "mailboxes_mailbox" ADD COLUMN "email_escalation_recipients" text;

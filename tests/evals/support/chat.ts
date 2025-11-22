@@ -104,6 +104,7 @@ const parseMessagesWithMocks = (input: string) => {
     slackBotToken: null,
     slackBotUserId: null,
     slackTeamId: null,
+    emailEscalationRecipients: null,
     promptUpdatedAt: new Date(),
     widgetHMACSecret: "test_secret",
     widgetDisplayMode: "off",
