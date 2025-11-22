@@ -1,6 +1,7 @@
 import { useSession } from "@/components/useSession";
 import AutoAssignSetting from "./autoAssignSetting";
 import ConfettiSetting from "./confettiSetting";
+import EmailEscalationSetting from "./emailEscalationSetting";
 import NextTicketPreviewSetting from "./nextTicketPreviewSetting";
 
 const PreferencesSetting = () => {
@@ -13,6 +14,7 @@ const PreferencesSetting = () => {
       <AutoAssignSetting />
       <ConfettiSetting />
       <NextTicketPreviewSetting />
+      <EmailEscalationSetting />
     </div>
   );
 };

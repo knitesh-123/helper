@@ -43,6 +43,7 @@ export const getMailboxInfo = (mailbox: typeof mailboxes.$inferSelect) => ({
   slackConnected: !!mailbox.slackBotToken,
   slackConnectUrl: env.SLACK_CLIENT_ID ? getSlackConnectUrl() : null,
   slackAlertChannel: mailbox.slackAlertChannel,
+  emailEscalationRecipients: mailbox.emailEscalationRecipients,
   githubConnected: !!mailbox.githubInstallationId,
   githubConnectUrl: env.GITHUB_APP_ID ? getGitHubInstallUrl() : null,
   githubRepoOwner: mailbox.githubRepoOwner,

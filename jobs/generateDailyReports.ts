@@ -1,10 +1,14 @@
 import { KnownBlock } from "@slack/web-api";
 import { subHours } from "date-fns";
 import { aliasedTable, and, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { Resend } from "resend";
 import { db } from "@/db/client";
 import { conversationMessages, conversations, mailboxes, platformCustomers } from "@/db/schema";
 import { triggerEvent } from "@/jobs/trigger";
 import { getMailbox } from "@/lib/data/mailbox";
+import DailyReportEmail from "@/lib/emails/dailyReport";
+import { env } from "@/lib/env";
+import { captureExceptionAndLog } from "@/lib/shared/sentry";
 import { postSlackMessage } from "@/lib/slack/client";
 
 export const TIME_ZONE = "America/New_York";
@@ -22,7 +26,12 @@ export async function generateDailyReports() {
 
 export async function generateMailboxDailyReport() {
   const mailbox = await getMailbox();
-  if (!mailbox?.slackBotToken || !mailbox.slackAlertChannel) return;
+  if (!mailbox) return;
+  
+  const hasSlack = mailbox.slackBotToken && mailbox.slackAlertChannel;
+  const hasEmail = mailbox.emailEscalationRecipients;
+  
+  if (!hasSlack && !hasEmail) return;
 
   const blocks: KnownBlock[] = [
     {
@@ -191,11 +200,49 @@ export async function generateMailboxDailyReport() {
     },
   });
 
+  // Send Slack notification
+  if (hasSlack && mailbox.slackBotToken && mailbox.slackAlertChannel) {
+    try {
   await postSlackMessage(mailbox.slackBotToken, {
     channel: mailbox.slackAlertChannel,
     text: `Daily summary for ${mailbox.name}`,
     blocks,
   });
+    } catch (error) {
+      captureExceptionAndLog(error);
+    }
+  }
+
+  // Send email notification
+  if (hasEmail && mailbox.emailEscalationRecipients && env.RESEND_API_KEY && env.RESEND_FROM_ADDRESS) {
+    try {
+      const resend = new Resend(env.RESEND_API_KEY);
+      const recipients = mailbox.emailEscalationRecipients
+        .split(",")
+        .map((email) => email.trim())
+        .filter(Boolean);
+
+      if (recipients.length > 0) {
+        await resend.emails.send({
+          from: env.RESEND_FROM_ADDRESS,
+          to: recipients,
+          subject: `Daily summary for ${mailbox.name}`,
+          react: DailyReportEmail({
+            mailboxName: mailbox.name,
+            openCountMessage,
+            answeredCountMessage,
+            openTicketsOverZeroMessage,
+            answeredTicketsOverZeroMessage,
+            avgReplyTimeMessage,
+            vipAvgReplyTimeMessage,
+            avgWaitTimeMessage,
+          }),
+        });
+      }
+    } catch (error) {
+      captureExceptionAndLog(error);
+    }
+  }
 
   return {
     success: true,
