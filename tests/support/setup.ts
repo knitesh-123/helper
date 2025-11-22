@@ -16,6 +16,8 @@ beforeAll(() => {
       GOOGLE_PUBSUB_CLAIM_EMAIL: "service-push-authentication@helper-ai-413611.iam.gserviceaccount.com",
       OPENAI_API_KEY: "test-openai-api-key",
       ADDITIONAL_PAID_ORGANIZATION_IDS: "org_1234567890",
+      RESEND_API_KEY: "test-resend-api-key",
+      RESEND_FROM_ADDRESS: "test@example.com",
     },
   }));
 
