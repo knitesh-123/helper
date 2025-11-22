@@ -3,6 +3,7 @@ import { conversationFactory } from "@tests/support/factories/conversations";
 import { platformCustomerFactory } from "@tests/support/factories/platformCustomers";
 import { userFactory } from "@tests/support/factories/users";
 import { subHours } from "date-fns";
+import { Resend } from "resend";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { generateMailboxDailyReport } from "@/jobs/generateDailyReports";
 import { getMailbox } from "@/lib/data/mailbox";
@@ -14,6 +15,18 @@ vi.mock("@/lib/data/mailbox", () => ({
 
 vi.mock("@/lib/slack/client", () => ({
   postSlackMessage: vi.fn(),
+}));
+
+const { sendEmailMock } = vi.hoisted(() => ({
+  sendEmailMock: vi.fn(),
+}));
+
+vi.mock("resend", () => ({
+  Resend: vi.fn().mockImplementation(() => ({
+    emails: {
+      send: sendEmailMock,
+    },
+  })),
 }));
 
 describe("generateMailboxDailyReport", () => {
@@ -114,6 +127,37 @@ describe("generateMailboxDailyReport", () => {
       text: `Daily summary for ${mailbox.name}`,
       blocks: expect.any(Array),
     });
+  });
+
+  it("sends email report when configured", async () => {
+    const { mailbox, user } = await userFactory.createRootUser({
+      mailboxOverrides: {
+        emailEscalationRecipients: "admin@example.com",
+      },
+    });
+
+    vi.mocked(getMailbox).mockResolvedValue(mailbox);
+
+    // Create some data
+    const midTime = subHours(new Date(), 12);
+    const { conversation } = await conversationFactory.create({
+      status: "open",
+      lastUserEmailCreatedAt: midTime,
+    });
+    const userMsg = await conversationFactory.createUserEmail(conversation.id, { createdAt: midTime });
+    await conversationFactory.createStaffEmail(conversation.id, user.id, {
+      createdAt: new Date(midTime.getTime() + 3600000),
+      responseToId: userMsg.id,
+    });
+
+    await generateMailboxDailyReport();
+
+    expect(sendEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: ["admin@example.com"],
+        subject: `Daily summary for ${mailbox.name}`,
+      }),
+    );
   });
 
   it("calculates correct metrics with VIP customers", async () => {

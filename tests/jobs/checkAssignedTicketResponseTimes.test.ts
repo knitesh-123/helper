@@ -15,6 +15,18 @@ vi.mock("@/lib/data/user", async (importOriginal) => ({
   getClerkUserList: vi.fn(),
 }));
 
+const { sendEmailMock } = vi.hoisted(() => ({
+  sendEmailMock: vi.fn(),
+}));
+
+vi.mock("resend", () => ({
+  Resend: vi.fn().mockImplementation(() => ({
+    emails: {
+      send: sendEmailMock,
+    },
+  })),
+}));
+
 describe("checkAssignedTicketResponseTimes", () => {
   const now = new Date("2024-01-15T10:00:00Z");
 
@@ -57,6 +69,34 @@ describe("checkAssignedTicketResponseTimes", () => {
             }),
           }),
         ]),
+      }),
+    );
+  });
+
+  it("sends an Email alert for overdue assigned tickets", async () => {
+    const { user } = await userFactory.createRootUser({
+      mailboxOverrides: {
+        slackBotToken: "valid-token",
+        slackAlertChannel: "channel-id",
+        emailEscalationRecipients: "admin@example.com",
+      },
+    });
+
+    const overdueDate = subDays(now, 2);
+    await conversationFactory.create({
+      assignedToId: user.id,
+      lastUserEmailCreatedAt: overdueDate,
+      status: "open",
+    });
+
+    vi.mocked(getSlackUsersByEmail).mockResolvedValue(new Map([[user.email!, "SLACK123"]]));
+
+    await checkAssignedTicketResponseTimes(now);
+
+    expect(sendEmailMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: ["admin@example.com"],
+        subject: expect.stringContaining("Assigned Ticket Response Time Alert"),
       }),
     );
   });
