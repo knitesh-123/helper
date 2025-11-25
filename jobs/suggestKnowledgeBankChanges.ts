@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { Resend } from "resend";
 import { getBaseUrl } from "@/components/constants";
 import { takeUniqueOrThrow } from "@/components/utils/arrays";
 import { assertDefined } from "@/components/utils/assert";
@@ -7,6 +8,9 @@ import { conversationMessages, faqs, mailboxes } from "@/db/schema";
 import { assertDefinedOrRaiseNonRetriableError } from "@/jobs/utils";
 import { generateKnowledgeBankSuggestion } from "@/lib/ai/knowledgeBankSuggestions";
 import { getMailbox } from "@/lib/data/mailbox";
+import KnowledgeBankSuggestionEmail from "@/lib/emails/knowledgeBankSuggestion";
+import { env } from "@/lib/env";
+import { captureExceptionAndLog } from "@/lib/shared/sentry";
 import { postSlackMessage } from "@/lib/slack/client";
 import { getSuggestedEditButtons } from "@/lib/slack/shared";
 
@@ -90,8 +94,11 @@ export const suggestKnowledgeBankChanges = async ({
 };
 
 const notifySuggestedEdit = async (faq: typeof faqs.$inferSelect, mailbox: typeof mailboxes.$inferSelect) => {
-  if (!mailbox.slackBotToken || !mailbox.slackAlertChannel) {
-    return "Not posted, mailbox not linked to Slack or missing alert channel";
+  const hasSlack = mailbox.slackBotToken && mailbox.slackAlertChannel;
+  const hasEmail = mailbox.emailEscalationRecipients;
+
+  if (!hasSlack && !hasEmail) {
+    return "Not posted, mailbox not linked to Slack or email";
   }
 
   let originalContent = "";
@@ -102,31 +109,69 @@ const notifySuggestedEdit = async (faq: typeof faqs.$inferSelect, mailbox: typeo
     originalContent = replacementFaq?.content ?? "";
   }
 
-  const messageTs = await postSlackMessage(mailbox.slackBotToken, {
-    blocks: [
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: originalContent
-            ? `💡 New suggested edit for the knowledge bank\n\n*Suggested content:*\n${faq.content}\n\n*This will overwrite the current entry:*\n${originalContent}`
-            : `💡 New suggested addition to the knowledge bank\n\n*Suggested content:*\n${faq.content}`,
-        },
-      },
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: `<${getBaseUrl()}/settings/knowledge|View knowledge bank>`,
-        },
-      },
-      getSuggestedEditButtons(faq.id),
-    ],
-    channel: mailbox.slackAlertChannel,
-  });
+  const isEdit = !!faq.suggestedReplacementForId;
 
-  await db
-    .update(faqs)
-    .set({ slackChannel: mailbox.slackAlertChannel, slackMessageTs: messageTs })
-    .where(eq(faqs.id, faq.id));
+  // Send Slack notification
+  if (hasSlack && mailbox.slackBotToken && mailbox.slackAlertChannel) {
+    try {
+      const messageTs = await postSlackMessage(mailbox.slackBotToken, {
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: originalContent
+                ? `💡 New suggested edit for the knowledge bank\n\n*Suggested content:*\n${faq.content}\n\n*This will overwrite the current entry:*\n${originalContent}`
+                : `💡 New suggested addition to the knowledge bank\n\n*Suggested content:*\n${faq.content}`,
+            },
+          },
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `<${getBaseUrl()}/settings/knowledge|View knowledge bank>`,
+            },
+          },
+          getSuggestedEditButtons(faq.id),
+        ],
+        channel: mailbox.slackAlertChannel,
+      });
+
+      await db
+        .update(faqs)
+        .set({ slackChannel: mailbox.slackAlertChannel, slackMessageTs: messageTs })
+        .where(eq(faqs.id, faq.id));
+    } catch (error) {
+      captureExceptionAndLog(error);
+    }
+  }
+
+  // Send email notification
+  if (hasEmail && mailbox.emailEscalationRecipients && env.RESEND_API_KEY && env.RESEND_FROM_ADDRESS) {
+    try {
+      const resend = new Resend(env.RESEND_API_KEY);
+      const recipients = mailbox.emailEscalationRecipients
+        .split(",")
+        .map((email) => email.trim())
+        .filter(Boolean);
+
+      if (recipients.length > 0) {
+        await resend.emails.send({
+          from: env.RESEND_FROM_ADDRESS,
+          to: recipients,
+          subject: isEdit
+            ? `Knowledge Bank: New suggested edit for ${mailbox.name}`
+            : `Knowledge Bank: New suggested addition for ${mailbox.name}`,
+          react: KnowledgeBankSuggestionEmail({
+            mailboxName: mailbox.name,
+            suggestedContent: faq.content,
+            isEdit,
+            originalContent: originalContent || null,
+          }),
+        });
+      }
+    } catch (error) {
+      captureExceptionAndLog(error);
+    }
+  }
 };
