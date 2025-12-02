@@ -1,4 +1,3 @@
-import { KnownBlock } from "@slack/web-api";
 import { subHours } from "date-fns";
 import { aliasedTable, and, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { Resend } from "resend";
@@ -9,14 +8,13 @@ import { getMailbox } from "@/lib/data/mailbox";
 import DailyReportEmail from "@/lib/emails/dailyReport";
 import { env } from "@/lib/env";
 import { captureExceptionAndLog } from "@/lib/shared/sentry";
-import { postSlackMessage } from "@/lib/slack/client";
 
 export const TIME_ZONE = "America/New_York";
 
 export async function generateDailyReports() {
   const mailboxesList = await db.query.mailboxes.findMany({
     columns: { id: true },
-    where: and(isNotNull(mailboxes.slackBotToken), isNotNull(mailboxes.slackAlertChannel)),
+    where: isNotNull(mailboxes.emailEscalationRecipients),
   });
 
   if (!mailboxesList.length) return;
@@ -27,22 +25,10 @@ export async function generateDailyReports() {
 export async function generateMailboxDailyReport() {
   const mailbox = await getMailbox();
   if (!mailbox) return;
-  
-  const hasSlack = mailbox.slackBotToken && mailbox.slackAlertChannel;
-  const hasEmail = mailbox.emailEscalationRecipients;
-  
-  if (!hasSlack && !hasEmail) return;
 
-  const blocks: KnownBlock[] = [
-    {
-      type: "section",
-      text: {
-        type: "plain_text",
-        text: `Daily summary for ${mailbox.name}:`,
-        emoji: true,
-      },
-    },
-  ];
+  const hasEmail = mailbox.emailEscalationRecipients;
+
+  if (!hasEmail) return;
 
   const endTime = new Date();
   const startTime = subHours(endTime, 24);
@@ -181,37 +167,6 @@ export async function generateMailboxDailyReport() {
   const avgWaitTimeMessage = avgWaitTimeResult?.average
     ? `• Average time existing open tickets have been open: ${formatTime(avgWaitTimeResult.average)}`
     : null;
-
-  blocks.push({
-    type: "section",
-    text: {
-      type: "mrkdwn",
-      text: [
-        openCountMessage,
-        answeredCountMessage,
-        openTicketsOverZeroMessage,
-        answeredTicketsOverZeroMessage,
-        avgReplyTimeMessage,
-        vipAvgReplyTimeMessage,
-        avgWaitTimeMessage,
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    },
-  });
-
-  // Send Slack notification
-  if (hasSlack && mailbox.slackBotToken && mailbox.slackAlertChannel) {
-    try {
-  await postSlackMessage(mailbox.slackBotToken, {
-    channel: mailbox.slackAlertChannel,
-    text: `Daily summary for ${mailbox.name}`,
-    blocks,
-  });
-    } catch (error) {
-      captureExceptionAndLog(error);
-    }
-  }
 
   // Send email notification
   if (hasEmail && mailbox.emailEscalationRecipients && env.RESEND_API_KEY && env.RESEND_FROM_ADDRESS) {

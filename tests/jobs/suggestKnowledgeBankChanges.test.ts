@@ -57,6 +57,7 @@ describe("suggestKnowledgeBankChanges", () => {
     vi.mocked(getMailbox).mockResolvedValue(mailbox);
     vi.mocked(generateKnowledgeBankSuggestion).mockResolvedValue({
       action: "create_entry",
+      reason: "Test reason",
       content: "New knowledge bank entry content",
     });
 
@@ -97,6 +98,7 @@ describe("suggestKnowledgeBankChanges", () => {
     vi.mocked(getMailbox).mockResolvedValue(mailbox);
     vi.mocked(generateKnowledgeBankSuggestion).mockResolvedValue({
       action: "create_entry",
+      reason: "Test reason",
       content: "New knowledge bank entry content",
     });
 
@@ -131,6 +133,7 @@ describe("suggestKnowledgeBankChanges", () => {
     vi.mocked(getMailbox).mockResolvedValue(mailbox);
     vi.mocked(generateKnowledgeBankSuggestion).mockResolvedValue({
       action: "create_entry",
+      reason: "Test reason",
       content: "New knowledge bank entry content",
     });
 
@@ -166,6 +169,7 @@ describe("suggestKnowledgeBankChanges", () => {
     vi.mocked(getMailbox).mockResolvedValue(mailbox);
     vi.mocked(generateKnowledgeBankSuggestion).mockResolvedValue({
       action: "create_entry",
+      reason: "Test reason",
       content: "New knowledge bank entry content",
     });
 

@@ -10,7 +10,6 @@ import { getBasicProfileById } from "@/lib/data/user";
 import VipMessageNotificationEmail from "@/lib/emails/vipMessageNotification";
 import { env } from "@/lib/env";
 import { captureExceptionAndLog } from "@/lib/shared/sentry";
-import { postVipMessageToSlack, updateVipMessageInSlack } from "@/lib/slack/vipNotifications";
 import { assertDefinedOrRaiseNonRetriableError } from "./utils";
 
 type MessageWithConversationAndMailbox = typeof conversationMessages.$inferSelect & {
@@ -66,7 +65,6 @@ async function handleVipNotifications(message: MessageWithConversationAndMailbox
     : [];
   const canSendEmail = recipients.length > 0 && env.RESEND_API_KEY && env.RESEND_FROM_ADDRESS;
 
-  let slackResult = "Skipped";
   let emailResult = "Skipped";
   let emailContext: {
     type: "user" | "reply";
@@ -75,79 +73,29 @@ async function handleVipNotifications(message: MessageWithConversationAndMailbox
     title?: string;
   } | null = null;
 
-  // Slack Notification
-  if (mailbox.slackBotToken && mailbox.vipChannelId) {
-    // If it's an agent reply updating an existing Slack message
-    if (message.role !== "user" && message.responseToId) {
-      const originalMessage = await db.query.conversationMessages.findFirst({
-        where: eq(conversationMessages.id, message.responseToId),
-      });
+  // Check if it's an agent reply
+  if (message.role !== "user" && message.responseToId) {
+    const replyCleanedUpText = await ensureCleanedUpText(message);
+    const replyingUser = message.userId ? await getBasicProfileById(message.userId) : null;
 
-      if (originalMessage?.slackMessageTs) {
-        const originalCleanedUpText = originalMessage ? await ensureCleanedUpText(originalMessage) : "";
-        const replyCleanedUpText = await ensureCleanedUpText(message);
-        const replyingUser = message.userId ? await getBasicProfileById(message.userId) : null;
+    const replySenderName =
+      replyingUser?.displayName ??
+      replyingUser?.email ??
+      (message.role === "ai_assistant" ? "AI Assistant" : "Helper Team");
+    emailContext = {
+      type: "reply",
+      body: replyCleanedUpText,
+      senderName: replySenderName,
+      title: `VIP Conversation Update for ${mailbox.name}`,
+    };
+  } else if (message.role === "user") {
+    const cleanedUpText = await ensureCleanedUpText(message);
 
-        await updateVipMessageInSlack({
-          conversation,
-          mailbox,
-          originalMessage: originalCleanedUpText,
-          replyMessage: replyCleanedUpText,
-          slackBotToken: mailbox.slackBotToken,
-          slackChannel: mailbox.vipChannelId,
-          slackMessageTs: originalMessage.slackMessageTs,
-          user: replyingUser,
-          email: true,
-          closed: conversation.status === "closed",
-        });
-        slackResult = "Updated";
-
-        const replySenderName =
-          replyingUser?.displayName ??
-          replyingUser?.email ??
-          (message.role === "ai_assistant" ? "AI Assistant" : "Helper Team");
-        emailContext = {
-          type: "reply",
-          body: replyCleanedUpText,
-          senderName: replySenderName,
-          title: `VIP Conversation Update for ${mailbox.name}`,
-        };
-      }
-    } else if (message.role === "user") {
-      const cleanedUpText = await ensureCleanedUpText(message);
-
-      const slackMessageTs = await postVipMessageToSlack({
-        conversation,
-        mailbox,
-        message: cleanedUpText,
-        platformCustomer,
-        slackBotToken: mailbox.slackBotToken,
-        slackChannel: mailbox.vipChannelId,
-      });
-
-      await db
-        .update(conversationMessages)
-        .set({ slackMessageTs, slackChannel: mailbox.vipChannelId })
-        .where(eq(conversationMessages.id, message.id));
-      slackResult = "Posted";
-
-      emailContext = {
-        type: "user",
-        body: cleanedUpText,
-        senderName: customerDisplayName,
-      };
-    }
-  } else {
-    slackResult = "Not posted, mailbox not linked to Slack";
-
-    if (message.role === "user") {
-      const cleanedUpText = await ensureCleanedUpText(message);
-      emailContext = {
-        type: "user",
-        body: cleanedUpText,
-        senderName: customerDisplayName,
-      };
-    }
+    emailContext = {
+      type: "user",
+      body: cleanedUpText,
+      senderName: customerDisplayName,
+    };
   }
 
   if (emailContext && canSendEmail) {
@@ -183,7 +131,7 @@ async function handleVipNotifications(message: MessageWithConversationAndMailbox
     }
   }
 
-  return `Slack: ${slackResult}, Email: ${emailResult}`;
+  return `Email: ${emailResult}`;
 }
 
 export const notifyVipMessage = async ({ messageId }: { messageId: number }) => {

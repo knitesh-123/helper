@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import { Resend } from "resend";
-import { getBaseUrl } from "@/components/constants";
 import { takeUniqueOrThrow } from "@/components/utils/arrays";
 import { assertDefined } from "@/components/utils/assert";
 import { db } from "@/db/client";
@@ -11,8 +10,6 @@ import { getMailbox } from "@/lib/data/mailbox";
 import KnowledgeBankSuggestionEmail from "@/lib/emails/knowledgeBankSuggestion";
 import { env } from "@/lib/env";
 import { captureExceptionAndLog } from "@/lib/shared/sentry";
-import { postSlackMessage } from "@/lib/slack/client";
-import { getSuggestedEditButtons } from "@/lib/slack/shared";
 
 export const suggestKnowledgeBankChanges = async ({
   messageId,
@@ -94,11 +91,10 @@ export const suggestKnowledgeBankChanges = async ({
 };
 
 const notifySuggestedEdit = async (faq: typeof faqs.$inferSelect, mailbox: typeof mailboxes.$inferSelect) => {
-  const hasSlack = mailbox.slackBotToken && mailbox.slackAlertChannel;
   const hasEmail = mailbox.emailEscalationRecipients;
 
-  if (!hasSlack && !hasEmail) {
-    return "Not posted, mailbox not linked to Slack or email";
+  if (!hasEmail) {
+    return "Not posted, mailbox not linked to email";
   }
 
   let originalContent = "";
@@ -110,41 +106,6 @@ const notifySuggestedEdit = async (faq: typeof faqs.$inferSelect, mailbox: typeo
   }
 
   const isEdit = !!faq.suggestedReplacementForId;
-
-  // Send Slack notification
-  if (hasSlack && mailbox.slackBotToken && mailbox.slackAlertChannel) {
-    try {
-      const messageTs = await postSlackMessage(mailbox.slackBotToken, {
-        blocks: [
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: originalContent
-                ? `💡 New suggested edit for the knowledge bank\n\n*Suggested content:*\n${faq.content}\n\n*This will overwrite the current entry:*\n${originalContent}`
-                : `💡 New suggested addition to the knowledge bank\n\n*Suggested content:*\n${faq.content}`,
-            },
-          },
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: `<${getBaseUrl()}/settings/knowledge|View knowledge bank>`,
-            },
-          },
-          getSuggestedEditButtons(faq.id),
-        ],
-        channel: mailbox.slackAlertChannel,
-      });
-
-      await db
-        .update(faqs)
-        .set({ slackChannel: mailbox.slackAlertChannel, slackMessageTs: messageTs })
-        .where(eq(faqs.id, faq.id));
-    } catch (error) {
-      captureExceptionAndLog(error);
-    }
-  }
 
   // Send email notification
   if (hasEmail && mailbox.emailEscalationRecipients && env.RESEND_API_KEY && env.RESEND_FROM_ADDRESS) {
